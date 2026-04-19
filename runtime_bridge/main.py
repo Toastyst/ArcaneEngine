@@ -6,21 +6,53 @@ from payload_parser import PayloadParser
 from prompt_builder import PromptBuilder
 from ollama_client import OllamaClient
 from overlay import Overlay
+from data_providers.tsm_provider import TSMProvider
+from rag.manager import RAGManager
 import threading
 
 stop_flag = threading.Event()
 
-def watch_loop(watcher, parser, builder, client, overlay, memory):
+def watch_loop(watcher, parser, builder, client, overlay, memory, tsm_provider, rag_manager):
     while not stop_flag.is_set():
         try:
             payload = watcher.watch()
             log_info(f"Detected payload: {payload}")
             data = parser.parse(payload)
             if data:
-                query = data.get('query', '')
+                if data.get('command') == 'market_status':
+                    query = 'all'
+                else:
+                    query = data.get('query', '')
                 memory_data = memory.get('goals') or ''
-                prompt = builder.build(query, memory_data)
-                response = client.call(prompt)
+                # Get TSM data
+                tsm_data = tsm_provider.get_data(query)
+                log_info(f"TSM data loaded: {len(tsm_data) if isinstance(tsm_data, dict) else 'none'} items")
+                if isinstance(tsm_data, dict):
+                    rag_manager.upsert_data(tsm_data)
+                    rag_chunks = rag_manager.retrieve(query)
+                else:
+                    rag_chunks = []
+                log_info(f"RAG returned {len(rag_chunks)} chunks")
+                prompt = builder.build(query, memory_data, rag_chunks)
+                tools = [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "calculator",
+                            "description": "Calculate basic math expressions",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "expression": {
+                                        "type": "string"
+                                    }
+                                },
+                                "required": ["expression"]
+                            }
+                        }
+                    }
+                ]
+                response = client.call(prompt, tools)
                 overlay.show_response(response)
                 log_info(f"Response: {response}")
             else:
@@ -38,9 +70,11 @@ def main():
     builder = PromptBuilder()
     client = OllamaClient(CONFIG['ollama_model'])
     overlay = Overlay(CONFIG['overlay_position'], CONFIG['overlay_size'])
+    tsm_provider = TSMProvider(CONFIG)
+    rag_manager = RAGManager(CONFIG)
 
     # Run watcher in thread
-    watcher_thread = threading.Thread(target=watch_loop, args=(watcher, parser, builder, client, overlay, memory))
+    watcher_thread = threading.Thread(target=watch_loop, args=(watcher, parser, builder, client, overlay, memory, tsm_provider, rag_manager))
     watcher_thread.daemon = True
     watcher_thread.start()
 

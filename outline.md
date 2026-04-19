@@ -1,6 +1,7 @@
 # Arcane Engine Master Outline
 **Last updated:** April 2026  
 **Status:** Bridge proven. Phase 1 scoped and ready for next development cycle.
+**Git Repo:** https://github.com/Toastyst/ArcaneEngine
 
 ## North Star
 A local Ollama-powered agent that acts as a real co-pilot inside World of Warcraft.  

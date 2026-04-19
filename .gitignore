@@ -39,3 +39,9 @@ Thumbs.db
 
 # WoW
 sync_addon.py  # dev only
+
+# Runtime Bridge
+chroma_db/
+*.txt
+runtime_bridge/TradeSkillMaster.lua
+phase2_outline.md
