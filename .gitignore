@@ -45,3 +45,4 @@ chroma_db/
 *.txt
 runtime_bridge/TradeSkillMaster.lua
 phase2_outline.md
+runtime_bridge/bridge.log.old

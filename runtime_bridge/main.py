@@ -9,6 +9,7 @@ from overlay import Overlay
 from data_providers.tsm_provider import TSMProvider
 from rag.manager import RAGManager
 import threading
+import signal
 
 stop_flag = threading.Event()
 
@@ -17,6 +18,7 @@ def watch_loop(watcher, parser, builder, client, overlay, memory, tsm_provider, 
         try:
             payload = watcher.watch()
             log_info(f"Detected payload: {payload}")
+            log_info("=== PROCESS START ===")
             data = parser.parse(payload)
             if data:
                 if data.get('command') == 'market_status':
@@ -55,13 +57,16 @@ def watch_loop(watcher, parser, builder, client, overlay, memory, tsm_provider, 
                 response = client.call(prompt, tools)
                 overlay.show_response(response)
                 log_info(f"Response: {response}")
+                log_info("=== PROCESS END ===")
             else:
                 log_error("Failed to parse payload")
         except Exception as e:
             log_error(f"Error: {e}")
 
 def main():
+    print("Setting up logging...")
     setup_logging(CONFIG['log_file'])
+    print("Logging setup done.")
     log_info("Starting Runtime Bridge")
 
     memory = Memory(CONFIG['memory_file'])
@@ -73,17 +78,26 @@ def main():
     tsm_provider = TSMProvider(CONFIG)
     rag_manager = RAGManager(CONFIG)
 
+    def signal_handler(sig, frame):
+        stop_flag.set()
+        overlay.root.quit()
+        log_info("Shutting down Runtime Bridge")
+
+    signal.signal(signal.SIGINT, signal_handler)
+
     # Run watcher in thread
     watcher_thread = threading.Thread(target=watch_loop, args=(watcher, parser, builder, client, overlay, memory, tsm_provider, rag_manager))
     watcher_thread.daemon = True
     watcher_thread.start()
 
-    try:
-        overlay.run()  # Run overlay mainloop in main thread
-    except KeyboardInterrupt:
-        stop_flag.set()
-        overlay.root.after(0, overlay.root.destroy)
-        log_info("Shutting down Runtime Bridge")
+    def check_stop():
+        if stop_flag.is_set():
+            overlay.root.quit()
+        overlay.root.after(100, check_stop)
+
+    overlay.root.after(100, check_stop)
+    overlay.root.mainloop()
+    log_info("Shutting down Runtime Bridge")
 
 if __name__ == "__main__":
     main()
