@@ -22,6 +22,21 @@ class OllamaClient:
             else:
                 return response['message']['content']
 
+    def chat(self, messages, tools=None):
+        while True:
+            response = ollama.chat(model=self.model, messages=messages, tools=tools)
+            if 'tool_calls' in response['message']:
+                for tool_call in response['message']['tool_calls']:
+                    tool_name = tool_call['function']['name']
+                    args = tool_call['function']['arguments']
+                    if tool_name == 'calculator':
+                        result = self._calculate(args.get('expression', ''))
+                        messages.append({'role': 'tool', 'content': str(result)})
+                    else:
+                        messages.append({'role': 'tool', 'content': 'Unknown tool'})
+            else:
+                return response['message']['content']
+
     def _calculate(self, expression):
         try:
             # Simple eval for basic math

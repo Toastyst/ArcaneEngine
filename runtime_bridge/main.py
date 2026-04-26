@@ -6,6 +6,7 @@ from payload_parser import PayloadParser
 from prompt_builder import PromptBuilder
 from ollama_client import OllamaClient
 from overlay import Overlay
+from conversation_manager import ConversationManager
 from data_providers.tsm_provider import TSMProvider
 from rag.manager import RAGManager
 import threading
@@ -13,7 +14,37 @@ import signal
 
 stop_flag = threading.Event()
 
-def watch_loop(watcher, parser, builder, client, overlay, memory, tsm_provider, rag_manager):
+def make_input_handler(conv_manager, builder, client, memory, overlay):
+    def handler(user_input):
+        conv_manager.add_user(user_input)
+        memory_data = memory.get('goals') or ''
+        system_content = builder.build_lightweight_system(conv_manager.original_query, memory_data)
+        messages = conv_manager.get_messages(system_content)
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "calculator",
+                    "description": "Calculate basic math expressions",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "expression": {
+                                "type": "string"
+                            }
+                        },
+                        "required": ["expression"]
+                    }
+                }
+            }
+        ]
+        response = client.chat(messages, tools)
+        conv_manager.add_assistant(response)
+        overlay.append_response(user_input, response)
+        log_info(f"Follow-up response: {response}")
+    return handler
+
+def watch_loop(watcher, parser, builder, client, overlay, memory, tsm_provider, rag_manager, conv_manager):
     while not stop_flag.is_set():
         try:
             payload = watcher.watch()
@@ -24,7 +55,8 @@ def watch_loop(watcher, parser, builder, client, overlay, memory, tsm_provider, 
                 if data.get('command') == 'market_status':
                     query = 'all'
                 else:
-                    query = data.get('query', '')
+                    query = data.get('query', data.get('command', ''))
+                conv_manager.start_session(payload, query)
                 memory_data = memory.get('goals') or ''
                 # Get TSM data
                 tsm_data = tsm_provider.get_data(query)
@@ -35,7 +67,8 @@ def watch_loop(watcher, parser, builder, client, overlay, memory, tsm_provider, 
                 else:
                     rag_chunks = []
                 log_info(f"RAG returned {len(rag_chunks)} chunks")
-                prompt = builder.build(query, memory_data, rag_chunks)
+                system_content = builder.build_system(query, memory_data, rag_chunks)
+                messages = conv_manager.get_messages(system_content)
                 tools = [
                     {
                         "type": "function",
@@ -54,8 +87,10 @@ def watch_loop(watcher, parser, builder, client, overlay, memory, tsm_provider, 
                         }
                     }
                 ]
-                response = client.call(prompt, tools)
-                overlay.show_response(response)
+                response = client.chat(messages, tools)
+                conv_manager.add_assistant(response)
+                overlay.append_response(payload, response)
+                overlay.enable_input()
                 log_info(f"Response: {response}")
                 log_info("=== PROCESS END ===")
             else:
@@ -74,7 +109,10 @@ def main():
     parser = PayloadParser()
     builder = PromptBuilder()
     client = OllamaClient(CONFIG['ollama_model'])
-    overlay = Overlay(CONFIG['overlay_position'], CONFIG['overlay_size'])
+    conv_manager = ConversationManager()
+    overlay = Overlay(CONFIG['overlay_position'], CONFIG['overlay_size'], conv_manager=conv_manager, input_handler=None)
+    input_handler = make_input_handler(conv_manager, builder, client, memory, overlay)
+    overlay.input_handler = input_handler
     tsm_provider = TSMProvider(CONFIG)
     rag_manager = RAGManager(CONFIG)
 
@@ -86,7 +124,7 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
 
     # Run watcher in thread
-    watcher_thread = threading.Thread(target=watch_loop, args=(watcher, parser, builder, client, overlay, memory, tsm_provider, rag_manager))
+    watcher_thread = threading.Thread(target=watch_loop, args=(watcher, parser, builder, client, overlay, memory, tsm_provider, rag_manager, conv_manager))
     watcher_thread.daemon = True
     watcher_thread.start()
 

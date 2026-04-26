@@ -21,7 +21,8 @@ class RAGManager:
         ids = []
         for section, section_data in data.items():
             for scope_key, details in section_data.items():
-                doc = f"TSM {section} {scope_key}: " + json.dumps(details, default=str, indent=2)[:1000]
+                metrics = self._extract_metrics(section, details)
+                doc = f"TSM {section} {scope_key}:\nKey metrics: {metrics}\nFull: {json.dumps(details, default=str, indent=2)[:2000]}"
                 documents.append(doc)
                 metadatas.append({"section": section, "scope": scope_key})
                 ids.append(f"{section}_{scope_key}")
@@ -29,6 +30,21 @@ class RAGManager:
             embeddings = [self.embed_text(doc) for doc in documents]
             self.collection.upsert(documents=documents, embeddings=embeddings, metadatas=metadatas, ids=ids)
             log_info(f"RAG upsert: {len(documents)} documents added")
+
+    def _extract_metrics(self, section, details):
+        if section == 'inventory':
+            qtys = [int(v) for v in details.values() if isinstance(v, (int, str)) and str(v).isdigit()] if isinstance(details, dict) else []
+            total_qty = sum(qtys)
+            top_items = sorted([(k, int(v)) for k, v in details.items() if isinstance(v, (int, str)) and str(v).isdigit()], key=lambda x: x[1], reverse=True)[:3] if isinstance(details, dict) else []
+            return f"Total qty: {total_qty}, top: {', '.join([f'{k}:{v}' for k,v in top_items])}"
+        elif section == 'accounting':
+            total_sales = sum(len(v) for v in details.values() if isinstance(v, list))
+            return f"Total sales entries: {total_sales}"
+        elif section == 'groups':
+            total_items = len(details.get('collapsed', {})) if isinstance(details, dict) else 0
+            return f"Items in group: {total_items}"
+        else:
+            return "Data available"
 
     def retrieve(self, query, n_results=5):
         query_embedding = self.embed_text(query)

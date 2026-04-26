@@ -1,7 +1,7 @@
 import tkinter as tk
 
 class Overlay:
-    def __init__(self, position=(100, 100), size=(400, 300)):
+    def __init__(self, position=(100, 100), size=(400, 300), conv_manager=None, input_handler=None):
         self.root = tk.Tk()
         self.root.geometry(f"{size[0]}x{size[1]}+{position[0]}+{position[1]}")
         self.root.attributes("-topmost", True)
@@ -11,6 +11,9 @@ class Overlay:
 
         self.root.grid_columnconfigure(0, weight=1)
         self.root.grid_rowconfigure(1, weight=1)
+
+        self.conv_manager = conv_manager
+        self.input_handler = input_handler
 
         # Header for drag
         self.header = tk.Frame(self.root, bg='gray', height=20)
@@ -32,8 +35,18 @@ class Overlay:
         self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.text_frame.grid(row=1, column=0, sticky='nsew')
 
-        self.bottom_frame = tk.Frame(self.root, bg='gray', height=10)
+        self.bottom_frame = tk.Frame(self.root, bg='gray', height=30)  # Increased height for input
         self.bottom_frame.grid(row=2, column=0, sticky='ew')
+
+        # Input entry
+        self.entry = tk.Entry(self.bottom_frame, bg='black', fg='white', font=('Arial', 10))
+        self.entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.entry.pack_forget()  # Hide initially
+
+        # New Chat button
+        self.new_chat_btn = tk.Button(self.bottom_frame, text="New Chat", command=self.new_chat, bg='gray', fg='white')
+        self.new_chat_btn.pack(side=tk.LEFT)
+        self.new_chat_btn.pack_forget()  # Hide initially
 
         # Resize handle
         self.resize_handle = tk.Label(self.bottom_frame, text="↘", bg='gray', width=3, height=2, relief='raised', bd=1, cursor='size_nw_se')
@@ -101,6 +114,48 @@ class Overlay:
         w = max(200, self.resize_start_w + dx)
         h = max(100, self.resize_start_h + dy)
         self.root.geometry(f"{w}x{h}")
+
+    def enable_input(self):
+        self.entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.new_chat_btn.pack(side=tk.LEFT)
+        self.entry.bind("<Return>", lambda e: self._handle_enter())
+
+    def _handle_enter(self):
+        user_input = self.entry.get().strip()
+        if user_input:
+            self.entry.delete(0, tk.END)
+            self.input_handler(user_input)
+
+    def new_chat(self):
+        self.conv_manager.clear()
+        self.clear_text()
+        self.hide_input()
+        self.show_ended_msg()
+
+    def hide_input(self):
+        self.entry.pack_forget()
+        self.new_chat_btn.pack_forget()
+
+    def show_ended_msg(self):
+        self.text.config(state='normal')
+        self.text.insert(tk.END, "\n\nConversation ended. Send new payload from game to start again.")
+        self.text.see(tk.END)
+        self.text.config(state='disabled')
+
+    def append_response(self, user_content, asst_content):
+        self.text.config(state='normal')
+        self.text.insert(tk.END, f"\n\n--- User: {user_content}\n\n--- Assistant: {asst_content}\n")
+        self.text.see(tk.END)
+        self.text.config(state='disabled')
+        self.root.deiconify()
+        self.root.update_idletasks()
+        if self.expanded_height is None:
+            self.expanded_height = self.root.winfo_height()
+
+    def clear_text(self):
+        self.text.config(state='normal')
+        self.text.delete(1.0, tk.END)
+        self.text.config(state='disabled')
 
     def run(self):
         self.root.mainloop()
